@@ -65,26 +65,6 @@ jobs:
         echo "KernelSU 选项: ${{ github.event.inputs.KERNELSU_OPTION }}"
         echo "::endgroup::"
 
-    - name: 📢 发送构建开始通知
-      if: ${{ github.event.inputs.NOTIFY_START == 'false' }}
-      uses: appleboy/telegram-action@master
-      with:
-        to: ${{ github.event.inputs.TELEGRAM_CHAT_ID || secrets.TELEGRAM_CHAT_ID }}
-        token: ${{ secrets.TELEGRAM_TOKEN }}
-        format: html
-        message: |
-          <b>🚀 内核构建已启动</b>
-          ━━━━━━━━━━━━━━━━━━
-          🔧 <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">查看工作流详情</a>
-          
-          <b>📦 构建标题</b>: <code>${{ github.event.inputs.BUILD_TITLE || github.event.inputs.CODENAME }}</code>
-          <b>📱 设备代号</b>: <code>${{ github.event.inputs.CODENAME }}</code>
-          <b>🌳 内核源码</b>: <code>${{ github.event.inputs.KERNEL_TREE }}/tree/${{ github.event.inputs.KERNEL_TREE_BRANCH }}</code>
-          <b>📤 上传到 Release</b>: <code>${{ github.event.inputs.UPLOAD_TO_RELEASE }}</code>
-          <b>🔧 KernelSU 选项</b>: <code>${{ github.event.inputs.KERNELSU_OPTION }}</code>
-          
-          ⏳ 构建任务已开始执行...
-
     - name: 📅 生成构建日期
       id: build_date
       run: |
