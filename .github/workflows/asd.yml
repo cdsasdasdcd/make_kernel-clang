@@ -71,7 +71,7 @@ jobs:
         sudo apt install -y flex bison libncurses-dev libssl-dev bc build-essential git ccache binutils-aarch64-linux-gnu aria2
         mkdir -p $HOME/tc
         cd $HOME/tc
-        aria2x -x10 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz -o clang.tar.gz
+        aria2c -x10 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz -o clang.tar.gz
         mkdir clang
         tar -xf clang.tar.gz -C clang
         echo "tools-folder=$HOME/tc/clang" >> $GITHUB_OUTPUT
