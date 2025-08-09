@@ -1,0 +1,269 @@
+name: buildisis
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      BUILD_TITLE:
+        description: '✨ 自定义构建标题'
+        required: false
+      KERNEL_TREE:
+        description: '🌳 内核源码仓库地址'
+        default: 'https://github.com/SunOS-Project/android_kernel_oneplus_sm8650/'
+        required: true
+      KERNEL_TREE_BRANCH:
+        description: '🌿 内核源码分支'
+        required: true
+        default: 'varuna'
+      CODENAME:
+        description: '📱 设备代号'
+        default: 'ace5'
+        required: true
+      UPLOAD_TO_RELEASE:
+        description: '☁️ 上传到 Release'
+        type: boolean
+        default: false
+      NOTIFY_START:
+        description: '🔔 构建开始时通知'
+        type: boolean
+        default: false
+      NOTIFY_SUCCESS:
+        description: '✅ 构建成功时通知'
+        type: boolean
+        default: false
+      TELEGRAM_CHAT_ID:
+        description: '💬 Telegram 聊天 ID (可选)'
+        required: false
+      KERNELSU_OPTION:
+        description: '⚙️ KernelSU 安装选项 (1: next, 2: next-susfs, 3: 不安装)'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+
+jobs:
+  build:
+    if: github.event.repository.owner.id == github.event.sender.id
+    runs-on: ubuntu-latest
+    environment: Telegram
+    permissions:
+      contents: write
+    steps:
+    - name: 📝 显示用户输入参数
+      run: |
+        echo "::group::📋 用户环境变量"
+        echo "自定义构建标题: ${{ github.event.inputs.BUILD_TITLE }}"
+        echo "内核源码: ${{ github.event.inputs.KERNEL_TREE }}/tree/${{ github.event.inputs.KERNEL_TREE_BRANCH }}"
+        echo "设备代号: ${{ github.event.inputs.CODENAME }}"
+        echo "上传到 Release: ${{ github.event.inputs.UPLOAD_TO_RELEASE }}"
+        echo "构建开始通知: ${{ github.event.inputs.NOTIFY_START }}"
+        echo "构建成功通知: ${{ github.event.inputs.NOTIFY_SUCCESS }}"
+        echo "Telegram 聊天 ID: ${{ github.event.inputs.TELEGRAM_CHAT_ID || secrets.TELEGRAM_CHAT_ID }}"
+        echo "KernelSU 选项: ${{ github.event.inputs.KERNELSU_OPTION }}"
+        echo "::endgroup::"
+
+    - name: 📢 发送构建开始通知
+      if: ${{ github.event.inputs.NOTIFY_START == 'false' }}
+      uses: appleboy/telegram-action@master
+      with:
+        to: ${{ github.event.inputs.TELEGRAM_CHAT_ID || secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_TOKEN }}
+        format: html
+        message: |
+          <b>🚀 内核构建已启动</b>
+          ━━━━━━━━━━━━━━━━━━
+          🔧 <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">查看工作流详情</a>
+          
+          <b>📦 构建标题</b>: <code>${{ github.event.inputs.BUILD_TITLE || github.event.inputs.CODENAME }}</code>
+          <b>📱 设备代号</b>: <code>${{ github.event.inputs.CODENAME }}</code>
+          <b>🌳 内核源码</b>: <code>${{ github.event.inputs.KERNEL_TREE }}/tree/${{ github.event.inputs.KERNEL_TREE_BRANCH }}</code>
+          <b>📤 上传到 Release</b>: <code>${{ github.event.inputs.UPLOAD_TO_RELEASE }}</code>
+          <b>🔧 KernelSU 选项</b>: <code>${{ github.event.inputs.KERNELSU_OPTION }}</code>
+          
+          ⏳ 构建任务已开始执行...
+
+    - name: 📅 生成构建日期
+      id: build_date
+      run: |
+        build_date=$(date +"%Y%m%d")  
+        echo "build_date=$build_date" >> $GITHUB_OUTPUT
+
+    - name: 🛠️ 初始化工作区
+      run: |
+        mkdir workspace
+        cd workspace
+        echo "workspace-folder=$(pwd)" >> $GITHUB_OUTPUT
+        echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
+        echo "build_title=${{ github.event.inputs.BUILD_TITLE || github.event.inputs.CODENAME }}" >> $GITHUB_OUTPUT
+      id: workspace
+
+    - name: ⚙️ 准备构建环境
+      run: |
+        sudo apt update -y
+        sudo apt install -y flex bison libncurses-dev libssl-dev bc build-essential git ccache binutils-aarch64-linux-gnu
+        mkdir -p $HOME/tc
+        cd $HOME/tc
+        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz -O clang.tar.gz
+        mkdir clang
+        tar -xf clang.tar.gz -C clang
+        echo "tools-folder=$HOME/tc/clang" >> $GITHUB_OUTPUT
+      id: tools
+
+    - name: 📥 克隆内核源码
+      run: |
+        git clone --depth=1 ${{ github.event.inputs.KERNEL_TREE }} -b ${{ github.event.inputs.KERNEL_TREE_BRANCH }} kernel_tree
+        echo "kernel-folder=$(pwd)/kernel_tree" >> $GITHUB_OUTPUT
+      working-directory: ${{ steps.workspace.outputs.workspace-folder }}
+      id: kernel
+
+    - name: 🔨 编译内核
+      run: |
+        # 清理现有 KernelSU 目录
+        rm -rf KernelSU-Next
+
+        # 根据选项配置 KernelSU
+        if [[ "${{ github.event.inputs.KERNELSU_OPTION }}" == '1' ]]; then
+          echo "⚙️ 使用 KernelSU Next 配置脚本..."
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+        elif [[ "${{ github.event.inputs.KERNELSU_OPTION }}" == '2' ]]; then
+          echo "⚙️ 使用 KernelSU Next-SUSFS 配置脚本..."
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next-susfs/kernel/setup.sh" | bash -s next-susfs
+        elif [[ "${{ github.event.inputs.KERNELSU_OPTION }}" == '3' ]]; then
+          echo "⏭️ 跳过 KernelSU 配置..."
+        else
+          echo "❌ 无效的 KernelSU 选项!"
+          exit 1
+        fi
+
+        # 设置编译环境
+        export PATH="$HOME/tc/clang/bin:$PATH"
+        export LD_LIBRARY_PATH=${HOME}/tc/clang/lib64:$LD_LIBRARY_PATH
+        export KBUILD_COMPILER_STRING=$($HOME/tc/clang/bin/clang --version | head -n 1 | perl -pe 's/\(http.*?\)//gs' | sed -e 's/  */ /g' -e 's/[[:space:]]*$//')
+        export KBUILD_LINKER_STRING=$($HOME/tc/clang/bin/ld.lld --version | head -n 1 | perl -pe 's/\(http.*?\)//gs' | sed -e 's/  */ /g' -e 's/[[:space:]]*$//' | sed 's/(compatible with [^)]*)//')
+
+        # 准备构建参数
+        DATE=$(date '+%Y%m%d-%H%M')
+        OUT_DIR=out/
+        VERSION="agmad-isis-PERIDOT-${DATE}"
+
+        if [[ -z "${KEBABS}" ]]; then
+            COUNT="$(grep -c '^processor' /proc/cpuinfo)"
+            export KEBABS="$COUNT"
+        fi
+
+        echo "💻 并行编译任务数: ${KEBABS}"
+
+        ARGS="ARCH=arm64 \
+        O=${OUT_DIR} \
+        CC=clang \
+        LD=ld.lld \
+        CLANG_TRIPLE=aarch64-linux-gnu- \
+        CROSS_COMPILE=aarch64-linux-gnu- \
+        CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+        -j${KEBABS}"
+
+        START=$(date +"%s")
+
+        # 开始编译
+        echo "🚀 开始编译内核..."
+        make -j${KEBABS} ${ARGS} peridot_defconfig
+        cd ${OUT_DIR}
+        make -j${KEBABS} ${ARGS} CC="ccache clang" HOSTCC="ccache gcc" HOSTCXX="cache g++" vendor/oplus/pineapple_GKI.config
+        cd ../
+        make -j${KEBABS} ${ARGS} CC="ccache clang" HOSTCC="ccache gcc" HOSTCXX="ccache g++" 2>&1 | tee build.log
+
+        # 完成处理
+        echo "🎉 内核编译完成"
+        END=$(date +"%s")
+        DIFF=$((END - START))
+        
+        if [ -f "out/arch/arm64/boot/Image.gz" ]; then
+            echo "📦 打包内核文件..."
+            git clone -q https://github.com/ahmedtohamy1/ak3 -b peridot ak3
+            cp out/arch/arm64/boot/Image.gz ak3
+            cd ak3
+            zip -r9 "../${VERSION}.zip" * -x '*.git*' README.md *placeholder >> /dev/null
+            cd ..
+            rm -rf ak3
+            echo "⏱️ 耗时: $((DIFF / 60)) 分 $((DIFF % 60)) 秒"
+            echo "📁 生成文件: ${VERSION}.zip"
+            echo "zipname=${VERSION}.zip" >> $GITHUB_OUTPUT
+        else
+            echo "❌ 编译失败!"
+            exit 1
+        fi
+      working-directory: ${{ steps.kernel.outputs.kernel-folder }}
+      id: build
+
+    - name: ☁️ 上传到 Release
+      if: ${{ github.event.inputs.UPLOAD_TO_RELEASE == 'true' }}
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          ${{ steps.kernel.outputs.kernel-folder }}/${{ steps.build.outputs.zipname }}
+        name: ${{ github.event.inputs.CODENAME }}-${{ steps.build_date.outputs.build_date }}
+        tag_name: ${{ github.event.inputs.CODENAME }}-${{ steps.build_date.outputs.build_date }}
+        body: |
+          <b>✅ 内核编译成功</b>
+          ━━━━━━━━━━━━━━━━━━
+          <b>${{ steps.workspace.outputs.build_title }}</b>
+          ⏱️ 编译耗时: ${{ steps.build.outputs.elapsed_time }} 秒
+          
+          <b>📱 设备代号</b>: <code>${{ github.event.inputs.CODENAME }}</code>
+          <b>🌳 内核源码</b>: ${{ github.event.inputs.KERNEL_TREE }}/tree/${{ github.event.inputs.KERNEL_TREE_BRANCH }}
+          <b>🔗 工作流详情</b>: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      id: upload_release
+
+    - name: 📝 创建 GoFile 上传脚本
+      run: |
+        echo '#!/bin/bash' > upload_gofile.sh
+        echo '' >> upload_gofile.sh
+        echo 'if [[ "$#"  ==  '\''0'\'' ]]; then' >> upload_gofile.sh
+        echo 'echo  -e '\''❌ 错误: 未指定文件!'\'' && exit 1' >> upload_gofile.sh
+        echo 'fi' >> upload_gofile.sh
+        echo 'FILE="@$1"' >> upload_gofile.sh
+        echo 'SERVER=$(curl -s https://api.gofile.io/servers | jq -r '\''.data.servers[0].name'\'')' >> upload_gofile.sh
+        echo 'LINK=$(curl -# -F file=${FILE} https://${SERVER}.gofile.io/uploadFile | jq -r '\''.data|.downloadPage'\'') 2>&1' >> upload_gofile.sh
+        echo 'echo $LINK' >> upload_gofile.sh
+        chmod +x upload_gofile.sh
+
+    - name: 🏷️ 重命名内核文件
+      run: |
+        BUILD_TIME_SUFFIX=$(date +"%Y%m%d%H%M%S")
+        mv ${{ steps.kernel.outputs.kernel-folder }}/${{ steps.build.outputs.zipname }} ${{ steps.kernel.outputs.kernel-folder }}/${{ github.event.inputs.CODENAME }}-${{ steps.build_date.outputs.build_date }}-${BUILD_TIME_SUFFIX}.zip
+        echo "BUILD_TIME_SUFFIX=${BUILD_TIME_SUFFIX}" >> $GITHUB_ENV
+
+    - name: 🌐 上传到 GoFile
+      id: upload_gofile
+      run: |
+        echo "⬆️ 正在上传文件到 GoFile..."
+        ./upload_gofile.sh ${{ steps.kernel.outputs.kernel-folder }}/${{ github.event.inputs.CODENAME }}-${{ steps.build_date.outputs.build_date }}-${{ env.BUILD_TIME_SUFFIX }}.zip > gofile_link.txt
+        FILE_URL=$(cat gofile_link.txt)
+        echo "📎 下载链接: $FILE_URL"
+        echo "FILE_URL=${FILE_URL}" >> $GITHUB_ENV
+
+    - name: 📨 发送构建成功通知
+      if: ${{ success() && github.event.inputs.NOTIFY_SUCCESS == 'true' }}
+      uses: appleboy/telegram-action@master
+      with:
+        to: ${{ github.event.inputs.TELEGRAM_CHAT_ID || secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_TOKEN }}
+        format: html
+        message: |
+          <b>✅ 内核编译成功</b>
+          ━━━━━━━━━━━━━━━━━━
+          🔧 <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">查看工作流详情</a>
+          
+          <b>📦 构建标题</b>: <code>${{ steps.workspace.outputs.build_title }}</code>
+          <b>📱 设备代号</b>: <code>${{ github.event.inputs.CODENAME }}</code>
+          <b>📄 生成文件</b>: <code>${{ steps.build.outputs.zipname }}</code>
+          <b>🔗 下载链接</b>: <a href="${{ env.FILE_URL }}">GoFile 下载</a>
+          
+          🎉 构建任务已完成!
+        files: |
+          ${{ steps.kernel.outputs.kernel-folder }}/${{ steps.build.outputs.zipname }}
