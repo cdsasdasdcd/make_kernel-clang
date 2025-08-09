@@ -4,38 +4,25 @@ on:
   workflow_dispatch:
 
     inputs:
-       
-      build_ko:
-        required: true
-        type: boolean
-        default: false
-        
-      ksu_v:
-        required: true
-        type: string
-        default: v0.9.5
-        description: >
-          ksu branch 
-          
       KERNEL_SOURCE:
         description: 'Kernel Source'
         required: true
-        default: 'https://github.com/HELLBOY017/kernel_oneplus_sm8250'
+        default: 'https://github.com/SunOS-Project/android_kernel_oneplus_sm8650/'
         
       KERNEL_SOURCE_BRANCH:
         description: 'Branch'
         required: true
-        default: 'V12'
+        default: 'varuna'
         
       KERNEL_DEFCONFIG:
         description: 'Defconfig'
         required: true
-        default: 'vendor/kona-perf_defconfig'
+        default: 'vendor/oplus/pineapple_GKI.config'
 
       CLANG_s:
         description: 'Clang  [14..]  or url'
         required: true
-        default: '17'      
+        default: '18'      
 
       shell:
         description: 'shell'
@@ -47,15 +34,10 @@ on:
         required: true
         default: 'oos' 
       
-      ksu_path_or_KPROBES:
-        description: '[0，1，2，3, 4]->[path-su,kprobes-su,only-path-su,only-kprobes-su,no-su]'
-        required: true
-        default: '2'
-
       upload:
         description: '[0,1]->[one,release]'
         required: true
-        default: '0' 
+        default: '1' 
 
 
 jobs:
@@ -122,78 +104,10 @@ jobs:
         mv \$1-\$2-$(TZ=Asia/Shanghai date "+%Y-%m-%d").zip ../../666
         end
         
-        if [ ${{ inputs.ksu_path_or_KPROBES }} == "0" ] || [ ${{ inputs.ksu_path_or_KPROBES }} == "1" ] || [ ${{ inputs.ksu_path_or_KPROBES }} == "4" ];then
         make O=out -j$(nproc --all) CC="ccache clang" CXX="ccache clang++" ARCH=arm64 CROSS_COMPILE=$CLANG_PATH/bin/aarch64-linux-gnu- CROSS_COMPILE_ARM32=$CLANG_PATH/bin/arm-linux-gnueabi- LD=ld.lld ${{ inputs.KERNEL_DEFCONFIG }}
-        echo "\n----------------------------"
-        sed s/CONFIG_LOCALVERSION=".*"/'CONFIG_LOCALVERSION="-perf-ksu-zhlhlf"'/g out/.config >>.config1
-        rm -rf out/.config
-        mv .config1 out/.config
+
         make O=out -j$(nproc --all) CC="ccache clang" CXX="ccache clang++" ARCH=arm64 CROSS_COMPILE=$CLANG_PATH/bin/aarch64-linux-gnu- CROSS_COMPILE_ARM32=$CLANG_PATH/bin/arm-linux-gnueabi- LD=ld.lld || exit 2>&1 | tee kernel.log
         sh AnyKernel3.sh ${{ inputs.zip_name }}
-        fi
-
-        if [ ${{ inputs.ksu_path_or_KPROBES }} == "0" ] || [ ${{ inputs.ksu_path_or_KPROBES }} == "1" ] || [ ${{ inputs.ksu_path_or_KPROBES }} == "2" ] || [ ${{ inputs.ksu_path_or_KPROBES }} == "3" ];then
-        echo -e "\n\n\n\n"
-        echo "\n\n--------------加入ksu编译-----------------"
-        rm -rf KernelSU drivers/ksu
-        sed -i s/'.*CONFIG_KERNELSU.*'//g drivers/Makefile
-        sed -i '/menu "KernelSU"/,/endmenu/d' drivers/Kconfig
-        sed -i s/'obj-y.*+=.*ksu.*'//g drivers/Makefile
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s ${{ inputs.ksu_v }}
-        make O=out CC="ccache clang" CXX="ccache clang++" ARCH=arm64 CROSS_COMPILE=$CLANG_PATH/bin/aarch64-linux-gnu- CROSS_COMPILE_ARM32=$CLANG_PATH/bin/arm-linux-gnueabi- LD=ld.lld ${{ inputs.KERNEL_DEFCONFIG }}
-        echo "\n----------------------------"
-        gg="$(cat out/.config | sed -n 's/.*CONFIG_LOCALVERSION="\([^"]*\).*/\1/p')_ksu"
-        sed s/CONFIG_LOCALVERSION=".*"/CONFIG_LOCALVERSION=\"$gg\"/g out/.config >>.config1
-        rm -rf out/.config
-
-        hh1="
-        CONFIG_MODULES=y
-        CONFIG_MODULE_SIG=n
-        CONFIG_MODULE_SIG_FORCE=n
-        CONFIG_MODULE_UNLOAD=y
-        CONFIG_MODVERSIONS=n
-        CONFIG_MODULE_FORCE_LOAD=y
-        CONFIG_SECURITY_SELINUX_DEVELOP=y
-        CONFIG_DM_VERITY=y
-        CONFIG_DM_VERITY_AVB=y
-        "
-        if [ ${{ inputs.build_ko }} = "true" ];then 
-        echo "\n\n----------------------"
-        echo "编译ko  补丁中"
-        sed -i s/'obj-.*kernelsu.o'/'obj-m += kernelsu.o'/g KernelSU/kernel/Makefile
-        #取消ksu patch内核补丁
-        bash ../patches.sh zhlhlf
-        
-        echo "[+] Add KernelSU symbols"
-        # python3 KernelSU/scripts/abi_gki_all.py android/abi_gki_aarch64.xml > android/abi_gki_aarch64.xml
-        cat KernelSU/kernel/export_symbol.txt | awk '{sub("[ \t]+","");print "  "$0}' >> android/abi_gki_aarch64
-        
-        #去模块生成error
-        #sed -i s/'static int warn_unresolved = 0'/'static int warn_unresolved = 1'/g scripts/mod/modpost.c
-       
-        echo "\n----------------------"   
-        else
-        if [ ${{ inputs.ksu_path_or_KPROBES }} = '0' ] || [ ${{ inputs.ksu_path_or_KPROBES }} = '2' ];then bash ../patches.sh ; echo "path----------" ; fi 
-        if [ ${{ inputs.ksu_path_or_KPROBES }} = '1' ] || [ ${{ inputs.ksu_path_or_KPROBES }} = '3' ];then for i in $hh; do echo $i >> .config1; done; echo "kprobes----------" ; fi 
-        fi
-        
-        hh="
-        CONFIG_KPROBES=y
-        CONFIG_HAVE_KPROBES=y
-        CONFIG_KPROBE_EVENTS=y
-        "
-    
-        #去模块签名、版本检验
-        sed -i s/'return strcmp(amagic, bmagic) == 0;'/'return 1;'/g kernel/module.c
-        #sed -i s/'err = check_modinfo(info->mod, info, flags);'/'err=0;'/g kernel/module.c
-
-        for i in $hh1; do echo $i >> .config1; done; echo "add config----------"
-        mv .config1 out/.config
-        echo "\n\n----------------------------"
-        cat out/.config | grep KPROBES
-        cat out/.config | grep CONFIG_MODULES
-        echo "\n----------------------------"
-        make O=out -j$(nproc --all) CC="ccache clang" CXX="ccache clang++" ARCH=arm64 CROSS_COMPILE=$CLANG_PATH/bin/aarch64-linux-gnu- CROSS_COMPILE_ARM32=$CLANG_PATH/bin/arm-linux-gnueabi- LD=ld.lld 2>&1 | tee kernel_ksu.log               
         oo=$(cat kernel_ksu.log | grep 'KernelSU version' | sed -n 1p | awk '{print $4}') ; echo "KSUV=$oo" >> $GITHUB_ENV ; echo "KSUV=$oo" ;
         sh AnyKernel3.sh  "${{ inputs.zip_name }}_$oo" "ksu"
         fi
