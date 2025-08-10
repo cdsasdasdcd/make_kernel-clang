@@ -37,7 +37,7 @@ jobs:
     - name: 拉取oneplus ace5内核清单
       run: |
         mkdir kernel && cd kernel
-        repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b oneplus/sm8650 -m oneplus_ace5.xml --depth=1
+        repo init -u https://github.com/cdsasdasdcd/kernel_manifest.git -b oneplus/sm8650 -m oneplus_ace5.xml --depth=1
         repo sync -j$(nproc --all)
         rm kernel_platform/common/android/abi_gki_protected_exports_* || echo "No protected exports!"
         rm kernel_platform/msm-kernel/android/abi_gki_protected_exports_* || echo "No protected exports!"
